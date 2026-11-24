@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sprintnest
+      POSTGRES_PASSWORD: sprintnest
+      POSTGRES_DB: sprintnest
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sprintnest"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    # Loads EMAIL_PROVIDER / RESEND_* from server/.env. Compose `environment`
+    # below still wins for Docker-network DATABASE_URL and REDIS_URL.
+    env_file:
+      - ./server/.env
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://sprintnest:sprintnest@postgres:5432/sprintnest
+      DIRECT_URL: postgresql://sprintnest:sprintnest@postgres:5432/sprintnest
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY_DAYS: 7
+      # APP_URL: http://localhost:3000
+      APP_URL: http://localhost:5173
+    volumes:
+      - ./server/src:/app/src
+      - ./server/prisma:/app/prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  client:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://server:3000
+    volumes:
+      - ./client/src:/app/src
+      - ./client/public:/app/public
+      - ./client/vite.config.ts:/app/vite.config.ts
+    depends_on:
+      - server
+
+volumes:
+  pgdata:
